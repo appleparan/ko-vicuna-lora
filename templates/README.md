@@ -44,3 +44,7 @@ A trimmed down alpaca template which seems to perform just as well and spare som
 ### vigogne
 
 The default alpaca template, translated to french. This template was used to train the "Vigogne" LoRA and is to be used to query it, or for extra fine tuning.
+
+### RedPajama-INCITE-Chat
+
+The default RedPajama-INCITE-Chat template.
