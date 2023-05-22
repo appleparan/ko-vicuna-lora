@@ -95,10 +95,12 @@ def train(
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-    MIN_TRANSFORMERS_VERSION = '4.25.1'
+    MIN_TRANSFORMERS_VERSION = "4.25.1"
 
     # check transformers version
-    assert transformers.__version__ >= MIN_TRANSFORMERS_VERSION, f'Please upgrade transformers to version {MIN_TRANSFORMERS_VERSION} or higher.'
+    assert (
+        transformers.__version__ >= MIN_TRANSFORMERS_VERSION
+    ), f"Please upgrade transformers to version {MIN_TRANSFORMERS_VERSION} or higher."
 
     gradient_accumulation_steps = batch_size // micro_batch_size
 
@@ -128,10 +130,11 @@ def train(
     tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     # init
-    model = AutoModelForCausalLM.from_pretrained(base_model,
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model,
         load_in_8bit=load_in_8bit,
         torch_dtype=torch.float16,
-        device_map=device_map
+        device_map=device_map,
     )
 
     def tokenize(prompt, add_eos_token=True):
