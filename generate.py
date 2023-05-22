@@ -72,11 +72,6 @@ def main(
             device_map={"": device},
         )
 
-    # unwind broken decapoda-research config
-    model.config.pad_token_id = tokenizer.pad_token_id = 0  # unk
-    model.config.bos_token_id = 1
-    model.config.eos_token_id = 2
-
     if not load_8bit:
         model.half()  # seems to fix bugs for some users.
 
@@ -88,11 +83,10 @@ def main(
         instruction,
         input=None,
         temperature=0.7,
-        top_p=0.75,
+        top_p=0.7,
         top_k=5,
         max_new_tokens=128,
         do_sample=True,
-        stream_output=False,
         **kwargs,
     ):
         prompt = prompter.generate_prompt(instruction, input)
