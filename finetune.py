@@ -20,23 +20,25 @@ from peft import (
     prepare_model_for_int8_training,
     set_peft_model_state_dict,
 )
-from transformers import LlamaForCausalLM, LlamaTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from utils.prompter import Prompter
 
 
 def train(
     # model/data params
-    base_model: str = "",  # the only required argument
+    base_model: str = "togethercomputer/RedPajama-INCITE-Chat-7B-v0.1",  # the only required argument
     data_path: str = "yahma/alpaca-cleaned",
     output_dir: str = "./lora-alpaca",
+    random_seed: int = 2023,
     # training hyperparams
     batch_size: int = 128,
-    micro_batch_size: int = 4,
+    micro_batch_size: int = 128,
     num_epochs: int = 3,
-    learning_rate: float = 3e-4,
+    learning_rate: float = 1e-5,
     cutoff_len: int = 256,
     val_set_size: int = 2000,
+    load_in_8bit: bool = False,
     # lora hyperparams
     lora_r: int = 8,
     lora_alpha: int = 16,
@@ -86,9 +88,23 @@ def train(
     assert (
         base_model
     ), "Please specify a --base_model, e.g. --base_model='huggyllama/llama-7b'"
+
+    # Fix Seed
+    if random_seed > 0:
+        torch.manual_seed(random_seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    MIN_TRANSFORMERS_VERSION = '4.25.1'
+
+    # check transformers version
+    assert transformers.__version__ >= MIN_TRANSFORMERS_VERSION, f'Please upgrade transformers to version {MIN_TRANSFORMERS_VERSION} or higher.'
+
     gradient_accumulation_steps = batch_size // micro_batch_size
 
     prompter = Prompter(prompt_template_name)
+
+    block_size = 2048
 
     device_map = "auto"
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -109,69 +125,36 @@ def train(
     if len(wandb_log_model) > 0:
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
 
-    model = LlamaForCausalLM.from_pretrained(
-        base_model,
-        load_in_8bit=True,
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
+
+    # init
+    model = AutoModelForCausalLM.from_pretrained(base_model,
+        load_in_8bit=load_in_8bit,
         torch_dtype=torch.float16,
-        device_map=device_map,
+        device_map=device_map
     )
-
-    tokenizer = LlamaTokenizer.from_pretrained(base_model)
-
-    tokenizer.pad_token_id = (
-        0  # unk. we want this to be different from the eos token
-    )
-    tokenizer.padding_side = "left"  # Allow batched inference
 
     def tokenize(prompt, add_eos_token=True):
         # there's probably a way to do this with the tokenizer settings
         # but again, gotta move fast
-        result = tokenizer(
+        inputs = tokenizer(
             prompt,
-            truncation=True,
-            max_length=cutoff_len,
-            padding=False,
-            return_tensors=None,
-        )
-        if (
-            result["input_ids"][-1] != tokenizer.eos_token_id
-            and len(result["input_ids"]) < cutoff_len
-            and add_eos_token
-        ):
-            result["input_ids"].append(tokenizer.eos_token_id)
-            result["attention_mask"].append(1)
+            return_tensors="pt",
+        ).to(model.device)
+        input_length = inputs.input_ids.shape[1]
 
-        result["labels"] = result["input_ids"].copy()
-
-        return result
+        return inputs
 
     def generate_and_tokenize_prompt(data_point):
         full_prompt = prompter.generate_prompt(
             data_point["instruction"],
-            data_point["input"],
-            data_point["output"],
         )
         tokenized_full_prompt = tokenize(full_prompt)
-        if not train_on_inputs:
-            user_prompt = prompter.generate_prompt(
-                data_point["instruction"], data_point["input"]
-            )
-            tokenized_user_prompt = tokenize(
-                user_prompt, add_eos_token=add_eos_token
-            )
-            user_prompt_len = len(tokenized_user_prompt["input_ids"])
 
-            if add_eos_token:
-                user_prompt_len -= 1
-
-            tokenized_full_prompt["labels"] = [
-                -100
-            ] * user_prompt_len + tokenized_full_prompt["labels"][
-                user_prompt_len:
-            ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    model = prepare_model_for_int8_training(model)
+    if load_in_8bit:
+        model = prepare_model_for_int8_training(model)
 
     config = LoraConfig(
         r=lora_r,
