@@ -1,4 +1,5 @@
 {
-    "<human>": "[Instruction]",
-    "<bot>": "[Response]",
+    "description": "Template used by RedPajama-INCITE-Chat.",
+    "prompt": "<human>: {instruction}\n<bot>:",
+    "response_split": "<bot>:"
 }
