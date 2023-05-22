@@ -13,3 +13,6 @@ test_data.json
 todo.txt
 .venv
 .vscode
+
+.python-version
+
