@@ -19,4 +19,4 @@ data/
 bioleaflets_train.jsonl
 bioleaflets_valid.jsonl
 bioleaflets_test.jsonl
-
+data
