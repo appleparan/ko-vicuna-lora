@@ -15,4 +15,8 @@ todo.txt
 .vscode
 
 .python-version
+data/
+bioleaflets_train.jsonl
+bioleaflets_valid.jsonl
+bioleaflets_test.jsonl
 
