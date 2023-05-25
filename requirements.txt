@@ -12,3 +12,4 @@ sentencepiece
 gradio
 isort
 faiss-gpu
+pytest
