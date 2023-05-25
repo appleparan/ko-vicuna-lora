@@ -32,8 +32,8 @@ from utils.prompter import Prompter
 def train(
     # model/data params
     base_model: str = "togethercomputer/RedPajama-INCITE-Chat-7B-v0.1",  # the only required argument
-    data_path: str = "yahma/alpaca-cleaned",
-    output_dir: str = "./lora-alpaca",
+    data_path: str = "../data/sharegpt_ko/",
+    output_dir: str = "./lora-redpajama",
     random_seed: int = 2023,
     # training hyperparams
     batch_size: int = 128,
@@ -61,7 +61,7 @@ def train(
     wandb_watch: str = "",  # options: false | gradients | all
     wandb_log_model: str = "",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
-    prompt_template_name: str = "alpaca",  # The prompt template to use, will default to alpaca.
+    prompt_template_name: str = "redpajama_ko",  # The prompt template to use, will default to alpaca.
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
