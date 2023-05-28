@@ -25,15 +25,15 @@ from utils.preprocessing import make_supervised_data_module
 
 def train(
     # model/data params
-    base_model: str = "togethercomputer/RedPajama-INCITE-Chat-7B-v0.1",  # the only required argument
+    base_model: str = "EleutherAI/polyglot-ko-3.8b",  # the only required argument
     data_path: str = "../data/sharegpt_deepl_ko/ko_dataset_2.json",
-    output_dir: str = "./lora-redpajama",
+    output_dir: str = "./lora-polyglot-ko-3.8b",
     random_seed: int = 2023,
     # training hyperparams
     batch_size: int = 128,
-    micro_batch_size: int = 128,
+    micro_batch_size: int = 2,
     num_epochs: int = 3,
-    learning_rate: float = 1e-5,
+    learning_rate: float = 2e-5,
     cutoff_len: int = 256,
     val_set_pct: int = 95,
     load_in_8bit: bool = False,
@@ -59,7 +59,7 @@ def train(
 ):
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(
-            f"Training Alpaca-LoRA model with params:\n"
+            f"Training {base_model} model with params:\n"
             f"base_model: {base_model}\n"
             f"data_path: {data_path}\n"
             f"output_dir: {output_dir}\n"
@@ -140,7 +140,15 @@ def train(
         model_max_length=block_size,
         use_fast=True,
     )
-    tokenizer.pad_token = tokenizer.unk_token
+    # Add new token for bot and human
+    new_tokens = ["<bot>(<봇>)", "<human>(<사람>)"]
+    tokenizer.add_tokens(list(new_tokens))
+
+    # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
+    # on a small vocab and want a smaller embedding size, remove this test.
+    embedding_size = model.get_input_embeddings().weight.shape[0]
+    if len(tokenizer) > embedding_size:
+        model.resize_token_embeddings(len(tokenizer))
 
     if load_in_8bit:
         model = prepare_model_for_int8_training(model)
@@ -196,7 +204,7 @@ def train(
             learning_rate=learning_rate,
             fp16=True,
             logging_steps=10,
-            optim="adamw_torch",
+            optim="adafactor",
             evaluation_strategy="steps" if val_set_pct > 0 else "no",
             save_strategy="steps",
             eval_steps=200 if val_set_pct > 0 else None,
@@ -208,6 +216,7 @@ def train(
             group_by_length=group_by_length,
             report_to="wandb" if use_wandb else None,
             run_name=wandb_run_name if use_wandb else None,
+            seed=random_seed,
         ),
         data_collator=default_data_collator,
         **data_module,

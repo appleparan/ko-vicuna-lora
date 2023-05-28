@@ -494,9 +494,23 @@ register_conv_template(
     )
 )
 
+# RedPajama INCITE default template
+register_conv_template(
+    Conversation(
+        name="polyglot_ko",
+        system="",
+        roles=("<human>(<사람>)", "<bot>(<봇>)"),
+        messages=(),
+        offset=0,
+        sep_style=SeparatorStyle.ADD_COLON_SINGLE,
+        sep="\n",
+        stop_str="<human>(<사람>)",
+    )
+)
+
 
 if __name__ == "__main__":
-    conv = get_conv_template("redpajama-incite_ko")
+    conv = get_conv_template("polyglot_ko")
     conv.append_message(conv.roles[0], "Hello!")
     conv.append_message(conv.roles[1], "Hi!")
     conv.append_message(conv.roles[0], "How are you?")

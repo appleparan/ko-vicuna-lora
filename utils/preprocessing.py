@@ -52,9 +52,6 @@ def preprocess(
     input_ids = tokenizer(
         conversations,
         return_tensors="pt",
-        padding="max_length",
-        max_length=tokenizer.model_max_length,
-        truncation=True,
     ).input_ids
     targets = input_ids.clone()
 
@@ -159,7 +156,6 @@ def make_supervised_data_module(
         val_set_pct = 0.98
     else:
         val_set_pct = _val_set_pct / 100.0
-
     split = int(len(perm) * val_set_pct)
     train_indices = perm[:split]
     eval_indices = perm[split:]
@@ -176,14 +172,49 @@ def make_supervised_data_module(
 if __name__ == "__main__":
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
-        "togethercomputer/RedPajama-INCITE-Chat-7B-v0.1",
+        "EleutherAI/polyglot-ko-5.8b",
         model_max_length=2048,
+        eos_token="<|endoftext|>",
+        pad_token="<|endoftext|>",
         use_fast=True,
     )
-    tokenizer.pad_token = tokenizer.unk_token
+    # tokenizer.pad_token = tokenizer.unk_token
     data_path = Path("../data/sharegpt_deepl_ko/ko_dataset_2.json")
     print(data_path.resolve())
 
     rng = np.random.default_rng(1234)
 
-    print(make_supervised_data_module(tokenizer, data_path, rng))
+    sequence_kr = str("<조수> : 테스트 완료.")
+    sequence_kr = str("<bot>(<조수>): 테스트 완료.")
+    sequence_kr = str("<Human>(<사람>): 테스트 완료.")
+    sequence_en = str("Hello, I'm an assistant.")
+    new_tokens = ["<bot>(<봇>)", "<human>(<사람>)"]
+
+    print("EleutherAI/polyglot-ko-5.8b")
+    tokenizer.add_tokens(list(new_tokens))
+    # model.resize_token_embeddings(len(tokenizer))
+    print(tokenizer.tokenize(sequence_en))
+    encoded = tokenizer(sequence_kr)
+    # input_ids = tokenizer(
+    #     sequence,
+    #     return_tensors="pt",
+    #     padding="max_length",
+    #     max_length=tokenizer.model_max_length,
+    #     truncation=True,
+    # ).input_ids
+    print([tokenizer.decode([id]) for id in encoded.input_ids])
+    # print(make_supervised_data_module(tokenizer, data_path, rng))
+
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        "huggyllama/llama-7b"
+    )
+    print("huggyllama/llama-7b")
+    print(tokenizer.tokenize(sequence_en))
+    print(tokenizer.tokenize(sequence_kr))
+
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        "kykim/bert-kor-base"
+    )
+    print("kykim/bert-kor-base")
+    print(tokenizer.tokenize(sequence_en))
+    print(tokenizer.tokenize(sequence_kr))
