@@ -1,8 +1,10 @@
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import List
 
+import datasets
 import fire
 import numpy as np
 import torch
@@ -19,8 +21,18 @@ from transformers import (
     AutoTokenizer,
     default_data_collator,
 )
+from transformers.trainer_utils import get_last_checkpoint
 
 from utils.preprocessing import make_supervised_data_module
+
+logger = logging.getLogger(__name__)
+
+# Setup logging
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
 
 
 def train(
@@ -29,6 +41,7 @@ def train(
     data_path: str = "../data/sharegpt_deepl_ko/ko_dataset_2.json",
     output_dir: str = "./lora-polyglot-ko-3.8b",
     random_seed: int = 2023,
+    overwrite_output_dir: bool = False,
     # training hyperparams
     batch_size: int = 128,
     micro_batch_size: int = 2,
@@ -86,6 +99,14 @@ def train(
     assert (
         base_model
     ), "Please specify a --base_model, e.g. --base_model='huggyllama/llama-7b'"
+
+    # Set logger
+    log_level = "INFO"
+    logger.setLevel(log_level)
+    datasets.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.enable_default_handler()
+    transformers.utils.logging.enable_explicit_format()
 
     # Fix Seed
     if random_seed > 0:
@@ -194,6 +215,20 @@ def train(
         model.is_parallelizable = True
         model.model_parallel = True
 
+    # Detecting last checkpoint.
+    last_checkpoint = None
+    if os.path.isdir(output_dir) and not overwrite_output_dir:
+        last_checkpoint = get_last_checkpoint(output_dir)
+        if last_checkpoint is None and len(os.listdir(output_dir)) > 0:
+            raise ValueError(
+                f"Output directory ({output_dir}) already exists and is not empty. "
+            )
+        elif last_checkpoint is not None and resume_from_checkpoint is None:
+            logger.info(
+                f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
+                "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
+            )
+
     trainer = transformers.Trainer(
         model=model,
         args=transformers.TrainingArguments(
@@ -233,9 +268,15 @@ def train(
     if torch.__version__ >= "2" and sys.platform != "win32":
         model = torch.compile(model)
 
-    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+    checkpoint = None
+    if resume_from_checkpoint is not None:
+        checkpoint = resume_from_checkpoint
+    elif last_checkpoint is not None:
+        checkpoint = last_checkpoint
+    trainer.train(resume_from_checkpoint=checkpoint)
 
     model.save_pretrained(output_dir)
+    model.config.save_pretrained(output_dir)
 
     print(
         "\n If there's a warning about missing keys above, please disregard :)"
