@@ -55,8 +55,8 @@ def train(
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     lora_target_modules: List[str] = [
-        "q_proj",
-        "v_proj",
+        "query_key_value",
+        "xxx",
     ],
     # llm hyperparams
     train_on_inputs: bool = True,  # if False, masks out inputs in loss
@@ -180,7 +180,10 @@ def train(
         target_modules=lora_target_modules,
         lora_dropout=lora_dropout,
         bias="none",
+        peft_type="LORA",
         task_type="CAUSAL_LM",
+        fan_in_fan_out=False,
+        init_lora_weights=True,
     )
     model = get_peft_model(model, config)
 
