@@ -27,7 +27,7 @@ def preprocess(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
 ) -> Dict:
-    conv = get_conv_template("redpajama-incite_ko")
+    conv = get_conv_template("polyglot_ko")
     roles = {
         "human": conv.roles[0],
         "gpt": conv.roles[1],
@@ -52,9 +52,9 @@ def preprocess(
     input_ids = tokenizer(
         conversations,
         return_tensors="pt",
-        padding="max_length",
-        max_length=tokenizer.model_max_length,
-        truncation=True,
+        # padding="max_length",
+        # max_length=tokenizer.model_max_length,
+        # truncation=True,
     ).input_ids
     targets = input_ids.clone()
 
