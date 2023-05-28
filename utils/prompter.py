@@ -37,5 +37,17 @@ class Prompter(object):
             print(res)
         return res
 
+    def generate_chat_prompt(
+        self,
+        chat_history: dict[str, str],
+    ) -> str:
+        # returns the full prompt from instruction and optional input
+        # if a label (=response, =output) is provided, it's also appended.
+        res = self.template["prompt"].format(instruction=instruction)
+
+        if self._verbose:
+            print(res)
+        return res
+
     def get_response(self, output: str) -> str:
         return output.split(self.template["response_split"])[1].strip()
