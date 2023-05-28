@@ -6,7 +6,7 @@ from typing import Dict
 import numpy as np
 import torch
 import transformers
-from conversations import SeparatorStyle, get_conv_template
+from utils.conversations import SeparatorStyle, get_conv_template
 from datasets import load_dataset
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
