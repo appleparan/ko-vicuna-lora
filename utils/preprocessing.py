@@ -52,9 +52,9 @@ def preprocess(
     input_ids = tokenizer(
         conversations,
         return_tensors="pt",
-        # padding="max_length",
-        # max_length=tokenizer.model_max_length,
-        # truncation=True,
+        padding="max_length",
+        max_length=tokenizer.model_max_length,
+        truncation=True,
     ).input_ids
     targets = input_ids.clone()
 
