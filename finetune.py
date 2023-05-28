@@ -154,14 +154,15 @@ def train(
         device_map=device_map,
     )
     model.config.use_cache = False
+    model.config.max_length = block_size
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
         base_model,
         model_max_length=block_size,
+        use_fast=True,
         eos_token="<|endoftext|>",
         pad_token="<|endoftext|>",
-        use_fast=True,
     )
     # Add new token for bot and human
     new_tokens = ["<bot>(<봇>)", "<human>(<사람>)"]
@@ -173,8 +174,11 @@ def train(
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
     embedding_size = model.get_input_embeddings().weight.shape[0]
+
     if len(tokenizer) > embedding_size:
         model.resize_token_embeddings(len(tokenizer))
+
+    # model.config.pad_token_id = tokenizer.pad_token_id = 0 # unk
 
     if load_in_8bit:
         model = prepare_model_for_int8_training(model)
