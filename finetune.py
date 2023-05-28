@@ -1,20 +1,12 @@
-import json
 import os
 import sys
-from typing import Dict, List
+from pathlib import Path
+from typing import List
 
 import fire
+import numpy as np
 import torch
 import transformers
-from datasets import load_dataset
-from torch import Dataset
-
-"""
-Unused imports:
-import torch.nn as nn
-import bitsandbytes as bnb
-"""
-
 from peft import (
     LoraConfig,
     get_peft_model,
@@ -27,154 +19,14 @@ from transformers import (
     AutoTokenizer,
     default_data_collator,
 )
-from transformers.trainer_pt_utils import LabelSmoother
 
-from utils.conversations import SeparatorStyle, get_conv_template
-from utils.prompter import Prompter
-
-IGNORE_TOKEN_ID = LabelSmoother.ignore_index
-
-
-local_rank = None
-
-
-def rank0_print(*args):
-    if local_rank == 0:
-        print(*args)
-
-
-def preprocess(
-    sources,
-    tokenizer: transformers.PreTrainedTokenizer,
-) -> Dict:
-    conv = get_conv_template("redpajama-incite_ko")
-    roles = {
-        "human": conv.roles[0],
-        "gpt": conv.roles[1],
-        "bard": conv.roles[1],
-    }
-
-    # Apply prompt templates
-    conversations = []
-    for i, source in enumerate(sources):
-        if roles[source[0]["from"]] != conv.roles[0]:
-            # Skip the first one if it is not from human
-            source = source[1:]
-
-        conv.messages = []
-        for j, sentence in enumerate(source):
-            role = roles[sentence["from"]]
-            assert role == conv.roles[j % 2], f"{i}"
-            conv.append_message(role, sentence["value"])
-        conversations.append(conv.get_prompt())
-
-    # Tokenize conversations
-    input_ids = tokenizer(
-        conversations,
-        return_tensors="pt",
-        padding="max_length",
-        max_length=tokenizer.model_max_length,
-        truncation=True,
-    ).input_ids
-    targets = input_ids.clone()
-
-    assert conv.sep_style == SeparatorStyle.ADD_COLON_TWO
-
-    # Mask targets
-    sep = conv.sep + conv.roles[1] + ": "
-    for conversation, target in zip(conversations, targets):
-        total_len = int(target.ne(tokenizer.pad_token_id).sum())
-
-        rounds = conversation.split(conv.sep2)
-        cur_len = 1
-        target[:cur_len] = IGNORE_TOKEN_ID
-        for i, rou in enumerate(rounds):
-            if rou == "":
-                break
-
-            parts = rou.split(sep)
-            if len(parts) != 2:
-                break
-            parts[0] += sep
-            round_len = len(tokenizer(rou).input_ids)
-            instruction_len = len(tokenizer(parts[0]).input_ids) - 2
-
-            target[cur_len : cur_len + instruction_len] = IGNORE_TOKEN_ID
-
-            cur_len += round_len
-        target[cur_len:] = IGNORE_TOKEN_ID
-
-        if False:
-            z = target.clone()
-            z = torch.where(z == IGNORE_TOKEN_ID, tokenizer.unk_token_id, z)
-            rank0_print(tokenizer.decode(z))
-
-        if cur_len < tokenizer.model_max_length:
-            if cur_len != total_len:
-                target[:] = IGNORE_TOKEN_ID
-                rank0_print(
-                    f"WARNING: tokenization mismatch: {cur_len} vs. {total_len}."
-                    f" (ignored)"
-                )
-
-    return dict(
-        input_ids=input_ids,
-        labels=targets,
-        attention_mask=input_ids.ne(tokenizer.pad_token_id),
-    )
-
-
-class SupervisedDataset(Dataset):
-    """Dataset for supervised fine-tuning."""
-
-    def __init__(self, raw_data, tokenizer: transformers.PreTrainedTokenizer):
-        super(SupervisedDataset, self).__init__()
-
-        rank0_print("Formatting inputs...")
-        sources = [example["conversations"] for example in raw_data]
-        data_dict = preprocess(sources, tokenizer)
-
-        self.input_ids = data_dict["input_ids"]
-        self.labels = data_dict["labels"]
-        self.attention_mask = data_dict["attention_mask"]
-
-    def __len__(self):
-        return len(self.input_ids)
-
-    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
-        return dict(
-            input_ids=self.input_ids[i],
-            labels=self.labels[i],
-            attention_mask=self.attention_mask[i],
-        )
-
-
-def make_supervised_data_module(
-    tokenizer: transformers.PreTrainedTokenizer, data_args
-) -> Dict:
-    """Make dataset and collator for supervised fine-tuning."""
-    dataset_cls = SupervisedDataset
-    rank0_print("Loading data...")
-    raw_data = json.load(open(data_args.data_path, "r"))
-
-    # Split train/test
-    perm = np.random.permutation(len(raw_data))
-    split = int(len(perm) * 0.98)
-    train_indices = perm[:split]
-    eval_indices = perm[split:]
-    train_raw_data = [raw_data[i] for i in train_indices]
-    eval_raw_data = [raw_data[i] for i in eval_indices]
-    rank0_print(f"#train {len(train_raw_data)}, #eval {len(eval_raw_data)}")
-
-    train_dataset = dataset_cls(train_raw_data, tokenizer=tokenizer)
-    eval_dataset = dataset_cls(eval_raw_data, tokenizer=tokenizer)
-    return dict(train_dataset=train_dataset, eval_dataset=eval_dataset)
+from utils.preprocessing import make_supervised_data_module
 
 
 def train(
     # model/data params
     base_model: str = "togethercomputer/RedPajama-INCITE-Chat-7B-v0.1",  # the only required argument
-    data_path: str = "../data/sharegpt_ko/",
+    data_path: str = "../data/sharegpt_deepl_ko/ko_dataset_2.json",
     output_dir: str = "./lora-redpajama",
     random_seed: int = 2023,
     # training hyperparams
@@ -183,7 +35,7 @@ def train(
     num_epochs: int = 3,
     learning_rate: float = 1e-5,
     cutoff_len: int = 256,
-    val_set_size: int = 2000,
+    val_set_pct: int = 95,
     load_in_8bit: bool = False,
     # lora hyperparams
     lora_r: int = 8,
@@ -216,7 +68,7 @@ def train(
             f"num_epochs: {num_epochs}\n"
             f"learning_rate: {learning_rate}\n"
             f"cutoff_len: {cutoff_len}\n"
-            f"val_set_size: {val_set_size}\n"
+            f"val_set_pct: {val_set_pct}\n"
             f"lora_r: {lora_r}\n"
             f"lora_alpha: {lora_alpha}\n"
             f"lora_dropout: {lora_dropout}\n"
@@ -235,17 +87,13 @@ def train(
         base_model
     ), "Please specify a --base_model, e.g. --base_model='huggyllama/llama-7b'"
 
-    global local_rank
-
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    if local_rank is None:
-        local_rank = 0
-
     # Fix Seed
     if random_seed > 0:
         torch.manual_seed(random_seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+
+    rng = np.random.default_rng(random_seed)
 
     MIN_TRANSFORMERS_VERSION = "4.25.1"
 
@@ -255,8 +103,6 @@ def train(
     ), f"Please upgrade transformers to version {MIN_TRANSFORMERS_VERSION} or higher."
 
     gradient_accumulation_steps = batch_size // micro_batch_size
-
-    prompter = Prompter(prompt_template_name)
 
     block_size = 2048
 
@@ -296,25 +142,6 @@ def train(
     )
     tokenizer.pad_token = tokenizer.unk_token
 
-    def tokenize(prompt, add_eos_token=True):
-        # there's probably a way to do this with the tokenizer settings
-        # but again, gotta move fast
-        inputs = tokenizer(
-            prompt,
-            return_tensors="pt",
-        ).to(model.device)
-        input_length = inputs.input_ids.shape[1]
-
-        return inputs
-
-    def generate_and_tokenize_prompt(data_point):
-        full_prompt = prompter.generate_prompt(
-            data_point["instruction"],
-        )
-        tokenized_full_prompt = tokenize(full_prompt)
-
-        return tokenized_full_prompt
-
     if load_in_8bit:
         model = prepare_model_for_int8_training(model)
 
@@ -327,11 +154,6 @@ def train(
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, config)
-
-    if data_path.endswith(".json") or data_path.endswith(".jsonl"):
-        data = load_dataset("json", data_files=data_path)
-    else:
-        data = load_dataset(data_path)
 
     if resume_from_checkpoint:
         # Check the available weights and load them
@@ -355,20 +177,10 @@ def train(
 
     model.print_trainable_parameters()  # Be more transparent about the % of trainable params.
 
-    if val_set_size > 0:
-        train_val = data["train"].train_test_split(
-            test_size=val_set_size, shuffle=True, seed=42
-        )
-        train_data = (
-            train_val["train"].shuffle().map(generate_and_tokenize_prompt)
-        )
-        val_data = (
-            train_val["test"].shuffle().map(generate_and_tokenize_prompt)
-        )
-    else:
-        train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
-        val_data = None
-
+    # {'train_dataset': , 'eval_dataset': }
+    data_module = make_supervised_data_module(
+        tokenizer, Path(data_path), rng, _val_set_pct=val_set_pct
+    )
     if not ddp and torch.cuda.device_count() > 1:
         # keeps Trainer from trying its own DataParallelism when more than 1 gpu is available
         model.is_parallelizable = True
@@ -376,8 +188,6 @@ def train(
 
     trainer = transformers.Trainer(
         model=model,
-        train_dataset=train_data,
-        eval_dataset=val_data,
         args=transformers.TrainingArguments(
             per_device_train_batch_size=micro_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -387,19 +197,20 @@ def train(
             fp16=True,
             logging_steps=10,
             optim="adamw_torch",
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
+            evaluation_strategy="steps" if val_set_pct > 0 else "no",
             save_strategy="steps",
-            eval_steps=200 if val_set_size > 0 else None,
+            eval_steps=200 if val_set_pct > 0 else None,
             save_steps=200,
             output_dir=output_dir,
             save_total_limit=3,
-            load_best_model_at_end=True if val_set_size > 0 else False,
+            load_best_model_at_end=True if val_set_pct > 0 else False,
             ddp_find_unused_parameters=False if ddp else None,
             group_by_length=group_by_length,
             report_to="wandb" if use_wandb else None,
             run_name=wandb_run_name if use_wandb else None,
         ),
         data_collator=default_data_collator,
+        **data_module,
     )
     model.config.use_cache = False
 
