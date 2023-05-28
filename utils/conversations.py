@@ -502,9 +502,9 @@ register_conv_template(
         roles=("<human>(<사람>)", "<bot>(<봇>)"),
         messages=(),
         offset=0,
-        sep_style=SeparatorStyle.ADD_COLON_SINGLE,
-        sep="\n",
-        stop_str="<human>(<사람>)",
+        sep_style=SeparatorStyle.ADD_COLON_TWO,
+        sep=" ",
+        sep2="<|endoftext|>",
     )
 )
 
